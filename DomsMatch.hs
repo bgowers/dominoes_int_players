@@ -104,7 +104,7 @@ module DomsMatch where
   in
    if (ls>rs) then (lb,L,ls) else (rb,R,rs)
    
- -------------------------------------------------------------------------------------
+ -----------------------------------------------------------------------------------------
  --- INTELLIGENT PLAYERS ---
 
  {-
@@ -227,7 +227,9 @@ module DomsMatch where
    playableDoms = (map (\dom -> (dom,L)) (leftdrops h b)) ++ (map (\dom -> (dom,R)) (rightdrops h b))
    blockHand = h \\ (badDoms remdoms playableDoms b opscore)
 
-
+ ----------------------------------------------------------------------------------------------
+ --- INTELLIGENT PLAYER HELPER FUNCTIONS ---
+ 
  -- hand to play from at start
 
  startPlayHand :: Hand -> Hand
