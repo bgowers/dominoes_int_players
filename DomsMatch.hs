@@ -126,7 +126,7 @@ module DomsMatch where
    | otherwise = hsdPlayer h b p s
   where
    pscore = playerScore p s
-   win_dom = get61 (domsWithScoresAndEnds h b) pscore
+   win_dom = get61 (getValidDrops h b) pscore
 
 
  {-
@@ -142,14 +142,14 @@ module DomsMatch where
    playHand = startPlayHand h
 
  getClosePlayer h b p s
-   | pscore < 53 = (hsdPlayer h b p s)
    | not (win_dom == ((-1,-1),L)) = win_dom
    | not (dom59 == ((-1,-1),L)) = dom59 -- play dom to score 59
+   | pscore < 53 = (hsdPlayer h b p s)
    | otherwise = hsdPlayer h b p s
   where
    pscore = playerScore p s
-   win_dom = get61 (domsWithScoresAndEnds h b) pscore
-   dom59 = get59 (domsWithScoresAndEnds h b) pscore
+   win_dom = get61 (getValidDrops h b) pscore
+   dom59 = get59 (getValidDrops h b) pscore
 
 
  {-
@@ -168,15 +168,19 @@ module DomsMatch where
  blockPlayer h b p s
    -- below, if a domino containing numbers from both ends of the board,
    -- or a double of an end is contained within the viable drops, play that domino
-   | ((elem (le,re) alldrops) || (elem (le,le) alldrops) || (elem (re,re) alldrops)) && ((getLastMovePlayer (getHistory b)) == p) = blockingDom (le,re) h b
-   | pscore < 53 = (hsdPlayer h b p s)
    | not (win_dom == ((-1,-1),L)) = win_dom
+   | (leftright || leftleft || rightright) && opknocking = blockingDom (le,re) h b   
+   | pscore < 53 = (hsdPlayer h b p s)
    | otherwise = hsdPlayer h b p s
   where
    pscore = playerScore p s
-   win_dom = get61 (domsWithScoresAndEnds h b) pscore
+   win_dom = get61 (getValidDrops h b) pscore
    (le,re) = orderDom (getEnds b) -- treat the ends of the board as a domino (ordered so highest pips first)
    alldrops = (leftdrops h b) ++ (rightdrops h b)
+   leftright = elem (le,re) alldrops
+   leftleft = elem (le,le) alldrops
+   rightright = elem (re,re) alldrops
+   opknocking = ((getLastMovePlayer (getHistory b)) == p)
 
 
  {-
@@ -191,20 +195,28 @@ module DomsMatch where
    playHand = startPlayHand h
 
  superPlayer h b p s
-   | ((elem (le,re) alldrops) || (elem (le,le) alldrops) || (elem (re,re) alldrops)) && ((getLastMovePlayer (getHistory b)) == p) = blockingDom (le,re) h b
-   | pscore < 53 = (hsdPlayer h b p s)
    | not (win_dom == ((-1,-1),L)) = win_dom
+   | (leftright || leftleft || rightright) && opknocking = blockingDom (le,re) h b
    | not (dom59 == ((-1,-1),L)) = dom59
+   | pscore < 53 = (hsdPlayer h b p s)
    | otherwise = hsdPlayer h b p s
   where
    pscore = playerScore p s
-   win_dom = get61 (domsWithScoresAndEnds h b) pscore
-   dom59 = get59 (domsWithScoresAndEnds h b) pscore
+   win_dom = get61 (getValidDrops h b) pscore
+   dom59 = get59 (getValidDrops h b) pscore
    (le,re) = orderDom (getEnds b)
    alldrops = (leftdrops h b) ++ (rightdrops h b)
+   leftright = elem (le,re) alldrops
+   leftleft = elem (le,le) alldrops
+   rightright = elem (re,re) alldrops
+   opknocking = ((getLastMovePlayer (getHistory b)) == p)
 
 
- -- intelligent player that will try to play (5,4) first, then hsd until 53, then find a winning dom
+ {-
+  same tactics as winPlayer apart from including a tactic where if the opponent's
+  score is 53 or above, if possible only play dominos that will block the other
+  player from winning
+ -} 
 
  blockOPWinPlayer :: DomsPlayer
  
@@ -215,74 +227,86 @@ module DomsMatch where
    playHand = startPlayHand h
 
  blockOPWinPlayer h b p s
-   | pscore < 53 = (hsdPlayer h b p s)
    | not (win_dom == ((-1,-1),L)) = win_dom
    | (opscore >= 53) && (not(null blockHand)) && ((hsdPlayer blockHand b p s) /= ((0,0),R)) = hsdPlayer blockHand b p s
+   | pscore < 53 = (hsdPlayer h b p s)
    | otherwise = hsdPlayer h b p s
   where
    pscore = playerScore p s
-   win_dom = get61 (domsWithScoresAndEnds h b) pscore
+   win_dom = get61 (getValidDrops h b) pscore
+   (le,re) = getEnds b
+   knockingLeft = genDomsX le
+   knockingRight = genDomsX re
    remdoms = getRemDoms h (getBoard b)
+   remdomsC = if ((getLastMovePlayer (getHistory b)) == p) then ((remdoms \\ knockingLeft) \\ knockingRight) else remdoms
    opscore = opScore p s
    playableDoms = (map (\dom -> (dom,L)) (leftdrops h b)) ++ (map (\dom -> (dom,R)) (rightdrops h b))
    blockHand = h \\ (badDoms remdoms playableDoms b opscore)
 
  ----------------------------------------------------------------------------------------------
  --- INTELLIGENT PLAYER HELPER FUNCTIONS ---
- 
+
  -- hand to play from at start
 
  startPlayHand :: Hand -> Hand
 
  startPlayHand h
-   | elem (6,3) h && elem (6,6) h = delete (5,5) h
-   | elem (5,2) h && elem (5,5) h = delete (6,6) h
-   | otherwise = delete (5,5) (delete (6,6) h)
+   | hasall = h
+   | has63 && hasd6 = delete (5,5) (delete (5,2) h)
+   | has52 && hasd5 = delete (6,6) (delete (6,3) h)
+   | otherwise = newHand
+  where
+   hasd6 = elem (6,6) h
+   has63 = elem (6,3) h
+   hasd5 = elem (5,5) h
+   has52 = elem (5,2) h
+   hasall = hasd6 && has63 && hasd5 && has52
+   newHand = h \\ [(5,5),(6,6),(5,2),(6,3)]
  
 
- -- check if any dominoes in hand obtain 61
+ -- return a domino from hand that can obtain a score of 61
 
  get61 :: [(Dom,Int,End)] -> Int -> (Dom,End)
 
  get61 [] _ = ((-1,-1),L)
 
- get61 doms@((dom,score,end):t) pscore
+ get61 ((dom,score,end):t) pscore
    | (61 - pscore) == score = (dom,end)
    | otherwise = get61 t pscore
   
 
- -- check if any dominoes in hand obtain 61
+ -- return a domino from hand that can obtain a score of 59
 
  get59 :: [(Dom,Int,End)] -> Int -> (Dom,End)
   
  get59 [] _ = ((-1,-1),L)
 
- get59 doms@((dom,score,end):t) pscore
+ get59 ((dom,score,end):t) pscore
    | (59 - pscore) == score = (dom,end)
    | otherwise = get59 t pscore
 
 
- -- get dominoes with their score and end to play
+ -- get dominoes with their scores and ends to play and concatenate the left and right lists
 
- domsWithScoresAndEnds :: Hand -> DomBoard -> [(Dom,Int,End)]
+ getValidDrops :: Hand -> DomBoard -> [(Dom,Int,End)]
 
- domsWithScoresAndEnds h b = 
+ getValidDrops h b = 
   let
    ld = leftdrops h b
    rd = rightdrops h b
-   leftDomsScores = if (not(null ld)) then (getDomScores ld L b) else []
-   rightDomsScores = if (not(null rd)) then (getDomScores rd R b) else []
+   leftDomsScores = if (not(null ld)) then (getDomScoresAndEnds ld L b) else []
+   rightDomsScores = if (not(null rd)) then (getDomScoresAndEnds rd R b) else []
    allDomsScores = leftDomsScores ++ rightDomsScores
   in
    allDomsScores
 
 
- -- get scores of all playable doms
+ -- zip dominoes with their score and end to play
 
- getDomScores :: [Dom] -> End -> DomBoard -> [(Dom,Int,End)]
+ getDomScoresAndEnds :: [Dom] -> End -> DomBoard -> [(Dom,Int,End)]
 
- getDomScores doms end board = map (\dom -> (dom,(scoreDom dom end board),end)) doms
-  
+ getDomScoresAndEnds doms end board = map (\dom -> (dom,(scoreDom dom end board),end)) doms
+
 
  -- get remaining score of player
  
@@ -309,14 +333,14 @@ module DomsMatch where
  getEnds (Board (l,_) (_,r) _) = (l,r)
 
 
- -- return the history
+ -- return the history of a given board
 
  getHistory :: DomBoard -> History
 
  getHistory (Board _ _ history) = history
 
 
- -- return player of last move made
+ -- return the player of the last move made
 
  getLastMovePlayer :: History -> Player
 
@@ -326,14 +350,7 @@ module DomsMatch where
    (p,moveNum) = maximumBy (comparing snd) moves
 
 
- -- other player is knocking
-
- opKnocking :: Player -> Player -> Bool
-
- opKnocking lastPlayer currentPlayer = lastPlayer == currentPlayer
-
-
- -- for when other player is knocking, get domino that match ends
+ -- get dominoes from hand that match ends of the board
 
  blockingDom :: Dom -> Hand -> DomBoard -> (Dom,End)
 
@@ -349,11 +366,32 @@ module DomsMatch where
    rd = rightdrops h b
 
 
- -- get remaining dominoes
+ -- get remaining dominoes (whole set minus those in hand and on board)
 
  getRemDoms :: Hand -> [Dom] -> [Dom]
 
  getRemDoms hand board = ((domSet \\ hand) \\ board)
+
+
+ {-
+  bad doms to play
+  i.e. dominoes that will enable the other player to win
+
+  remdoms - all remaining dominoes
+  hand - all playable dominoes from original hand with their ends
+  board - the board
+  opscore - opponent's score
+ -}
+ badDoms :: [Dom] -> [(Dom,End)] -> DomBoard -> Int -> [Dom]
+ 
+ badDoms _ [] _ _ = []
+
+ badDoms remdoms ((dom,end):rhand) board opscore = filter (/=(-1,-1)) (badDom:(badDoms remdoms rhand board opscore))
+  where
+   Just newboard = playDom P1 dom end board
+   remdomsWithScores = getValidDrops remdoms newboard
+   opWinDoms = filter (\(_,opdomscore,_) -> ((61 - opscore) == opdomscore)) remdomsWithScores
+   badDom = if (not(null opWinDoms)) then (dom) else (-1,-1)
 
 
  -- generate all doms that contain a given number
@@ -363,30 +401,12 @@ module DomsMatch where
  genDomsX x = [if (x<y) then (x,y) else (y,x) | y <- [0..6]]
 
 
- -- get the board
+ -- get the dominoes from a given DomBoard
  
  getBoard :: DomBoard -> [Dom]
  
  getBoard (Board _ _ history) = [dom|(dom, _, _)<-history]
 
-
- -- bad doms to play
-
- badDoms :: [Dom] -> [(Dom,End)] -> DomBoard -> Int -> [Dom]
- {-
-  remdoms - all remaining dominoes
-  hand - all playable dominoes from original hand with their ends
-  board - the board
-  opscore - opponent's score
- -}
- badDoms _ [] _ _ = []
-
- badDoms remdoms hand@((dom,end):rhand) board opscore = filter (/=(-1,-1)) (badDom:(badDoms remdoms rhand board opscore))
-  where
-   Just newboard = playDom P1 dom end board
-   remdomsWithScores = domsWithScoresAndEnds remdoms newboard
-   opWinDoms = filter (\(_,opdomscore,_) -> ((61 - opscore) == opdomscore)) remdomsWithScores
-   badDom = if (not(null opWinDoms)) then (dom) else (-1,-1)
 
  -- change domino to greatest pip first
  
